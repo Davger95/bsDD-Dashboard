@@ -1,1 +1,126 @@
 
+# app.py
+import dash
+from dash import dcc, html, Input, Output, State, ctx
+import dash_table
+import json
+import uuid
+import pandas as pd
+import datetime
+
+app = dash.Dash(__name__)
+server = app.server
+
+# Initial empty dataframes
+empty_class_df = pd.DataFrame(columns=["Code", "Name", "Description", "RelatedIfcEntities", "DocumentReference"])
+empty_property_df = pd.DataFrame(columns=["Code", "Name", "Definition", "DataType", "Unit", "PropertySet"])
+
+app.layout = html.Div([
+    html.H1("bSDD Data Dictionary Editor"),
+
+    html.H2("Dictionary Metadata"),
+    html.Div([
+        dcc.Input(id="dictionary-code", placeholder="Dictionary Code", type="text"),
+        dcc.Input(id="dictionary-name", placeholder="Dictionary Name", type="text"),
+        dcc.Input(id="dictionary-version", placeholder="Version", type="text"),
+        dcc.Input(id="dictionary-language", placeholder="Language (e.g., EN)", type="text"),
+    ], style={"marginBottom": 20}),
+
+    html.H2("Classes"),
+    dash_table.DataTable(
+        id='class-table',
+        columns=[{"name": i, "id": i, "editable": True} for i in empty_class_df.columns],
+        data=empty_class_df.to_dict("records"),
+        editable=True,
+        row_deletable=True
+    ),
+    html.Button("Add Class", id="add-class-btn", n_clicks=0),
+
+    html.H2("Properties"),
+    dash_table.DataTable(
+        id='property-table',
+        columns=[{"name": i, "id": i, "editable": True} for i in empty_property_df.columns],
+        data=empty_property_df.to_dict("records"),
+        editable=True,
+        row_deletable=True
+    ),
+    html.Button("Add Property", id="add-property-btn", n_clicks=0),
+
+    html.Hr(),
+    html.Button("Export to bSDD JSON", id="export-btn", n_clicks=0),
+    dcc.Download(id="download-json")
+])
+
+@app.callback(
+    Output("class-table", "data"),
+    Input("add-class-btn", "n_clicks"),
+    State("class-table", "data"),
+    prevent_initial_call=True
+)
+def add_class_row(n, rows):
+    rows.append({col: "" for col in empty_class_df.columns})
+    return rows
+
+@app.callback(
+    Output("property-table", "data"),
+    Input("add-property-btn", "n_clicks"),
+    State("property-table", "data"),
+    prevent_initial_call=True
+)
+def add_property_row(n, rows):
+    rows.append({col: "" for col in empty_property_df.columns})
+    return rows
+
+@app.callback(
+    Output("download-json", "data"),
+    Input("export-btn", "n_clicks"),
+    State("dictionary-code", "value"),
+    State("dictionary-name", "value"),
+    State("dictionary-version", "value"),
+    State("dictionary-language", "value"),
+    State("class-table", "data"),
+    State("property-table", "data"),
+    prevent_initial_call=True
+)
+def export_to_json(n_clicks, code, name, version, lang, classes, properties):
+    output = {
+        "ModelVersion": "2.0",
+        "OrganizationCode": "demo-org",
+        "DictionaryCode": code or "demoDict",
+        "DictionaryName": name or "Demo Dictionary",
+        "DictionaryVersion": version or "1.0.0",
+        "LanguageIsoCode": lang or "EN",
+        "Status": "Preview",
+        "Classes": [],
+        "Properties": []
+    }
+
+    for cls in classes:
+        output["Classes"].append({
+            "Code": cls.get("Code"),
+            "Name": cls.get("Name"),
+            "Description": cls.get("Description"),
+            "RelatedIfcEntityNamesList": [e.strip() for e in cls.get("RelatedIfcEntities", "").split(",") if e],
+            "DocumentReference": cls.get("DocumentReference"),
+            "Status": "Preview",
+            "ClassProperties": []
+        })
+
+    for prop in properties:
+        output["Properties"].append({
+            "Code": prop.get("Code"),
+            "Name": prop.get("Name"),
+            "Definition": prop.get("Definition"),
+            "DataType": prop.get("DataType"),
+            "Units": [prop.get("Unit")] if prop.get("Unit") else [],
+            "PropertyValueKind": "Single",
+            "PropertySet": prop.get("PropertySet"),
+            "Status": "Preview",
+            "AllowedValues": []
+        })
+
+    filename = f"bsdd_export_{datetime.datetime.utcnow().isoformat()}.json"
+    return dcc.send_string(json.dumps(output, indent=2), filename=filename)
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
